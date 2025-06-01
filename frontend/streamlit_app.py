@@ -1,30 +1,75 @@
-import streamlit as st
-from app.captioner.blib_captioner import BlipCaptioner
-# from app.captioner.gpt_captioner import GPTCaptioner
-from app.example.example import CaptionExample
+import random
 import tempfile
 
-blip = BlipCaptioner()
+import streamlit as st
 
-st.title("🖼️ Caption Generator")
+from app.chain import captioning
+from frontend.constants import DEFAULT_EXAMPLES, MOODS, SOCIAL_MEDIA_LIST
 
-uploaded_file = st.file_uploader("Carica un'immagine", type=["jpg", "jpeg", "png"])
-examples = [CaptionExample(line) for line in st.text_area("Caption esempio (una per riga)", height=100).splitlines()]
-social = st.selectbox("Seleziona il social media", ["Instagram", "Facebook", "Twitter", "LinkedIn"])
-mood = st.selectbox("Seleziona il mood", ["None", "Informative", "Funny", "Inspirational", "Promotional"])
+st.set_page_config(layout="centered")
+st.title("🖼️ Social Captioner")
+
+uploaded_file = st.file_uploader("Upload an image!", type=["jpg", "jpeg", "png"])
+social = st.selectbox("Choose the social media.", SOCIAL_MEDIA_LIST)
+mood = st.selectbox("Chosse the mood you want to inject in the caption.", MOODS)
+
+# Inizializza session_state se non esiste
+if "selected_caption" not in st.session_state:
+    st.session_state.selected_caption = None
 
 if uploaded_file:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_file:
         tmp_file.write(uploaded_file.read())
         tmp_path = tmp_file.name
 
-    st.image(tmp_path, caption="Immagine caricata", use_column_width=True)
+    st.image(tmp_path, caption="Uploaded image", use_container_width=True)
 
-    if st.button("Genera caption"):
-        caption = blip(tmp_path, social="Instagram", mood = None if mood == "None" else mood, examples=examples)
-        st.write(f"**BLIP:** {caption}")
+    context = st.text_area(
+        "Insert your description of the scene, what the image means to you, or any other context you want to provide.",
+    )
 
-    #     if examples and "OPENAI_API_KEY" in st.secrets:
-    #         gpt = GPTCaptioner(api_key=st.secrets["OPENAI_API_KEY"])
-    #         styled = gpt.personalize_caption(caption, examples)
-    #         st.write(f"**Stile utente:** {styled}")
+    st.subheader("✏️ Examples (otpional)")
+
+    # Inizializza session_state per contenere le caption esempio
+    if "example_captions" not in st.session_state:
+        st.session_state.example_captions = []
+
+    # Bottone per aggiungere un nuovo campo di esempio
+    if st.button("+ Add example"):
+        st.session_state.example_captions.append(random.choice(DEFAULT_EXAMPLES))
+
+    # Visualizza tutti gli input di esempio
+    for i, caption in enumerate(st.session_state.example_captions):
+        st.session_state.example_captions[i] = st.text_input(
+            f"Example {i + 1}", value=caption, key=f"example_{i}"
+        )
+
+    if st.button("✨ Generate"):
+        captions = captioning(
+            tmp_path,
+            social.lower(),
+            mood.lower(),
+            user_context=context,
+            examples=[
+                caption
+                for caption in st.session_state.example_captions
+                if caption != ""
+            ],
+        )
+        if not captions:
+            st.error("No caption generated.")
+            st.stop()
+        st.session_state.generated_captions = captions
+        st.session_state.selected_caption = None  # reset selezione
+
+    if "generated_captions" in st.session_state:
+        st.subheader("💬 Generated captions:")
+        for i, caption in enumerate(st.session_state.generated_captions):
+            if st.button(f"{i + 1}: {caption}", key=f"caption_{i}"):
+                st.session_state.selected_caption = caption
+
+    # Mostra la caption selezionata in modo ben visibile
+    if st.session_state.selected_caption:
+        st.markdown("---")
+        st.markdown("### ✅ Selected caption:")
+        st.success(f"**{st.session_state.selected_caption}**")

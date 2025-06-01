@@ -1,0 +1,15 @@
+#| Codice | Spiegazione                                  | Dove si applica            |
+#| ------ | -------------------------------------------- | -------------------------- |
+#| `D100` | Docstring mancante per un **modulo**         | All'inizio del file `.py`  |
+#| `D101` | Docstring mancante per una **classe**        | `class MyClass:`           |
+#| `D102` | Docstring mancante per un **metodo**         | `def my_method(self):`     |
+#| `D103` | Docstring mancante per una **funzione**      | `def my_function():`       |
+#| `D104` | Docstring mancante per un **package**        | In `__init__.py`           |
+#| `D105` | Docstring mancante per una **classe magica** | tipo `__str__`, `__init__` |
+#| `D107` | Docstring mancante per `__init__()`          |                            |
+
+lint.ignore = [
+  "E501",    # Disattiva limite di 88 caratteri per riga
+  "UP006",   # Permette l'uso di 'list' invece di 'List' nei type hint
+  "D100", "D101", "D102", "D103", "D104", "D105", "D107"  # Disattiva obbligo docstring
+]

@@ -1,11 +1,15 @@
-from transformers import BlipProcessor, BlipForConditionalGeneration
-from PIL import Image
 import logging
+
+from PIL import Image
+from transformers import BlipForConditionalGeneration, BlipProcessor
+
+from app.models.constants import BLIP_DEFAULT_MODEL
 
 logger = logging.getLogger(__name__)
 
+
 class BlipCaptioner:
-    def __init__(self, model_name="Salesforce/blip-image-captioning-large"):
+    def __init__(self, model_name=BLIP_DEFAULT_MODEL):
         self.processor = BlipProcessor.from_pretrained(model_name)
         self.model = BlipForConditionalGeneration.from_pretrained(model_name)
 
