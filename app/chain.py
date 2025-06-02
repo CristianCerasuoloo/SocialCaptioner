@@ -137,7 +137,8 @@ def captioning(
     }
 
     # Step 3 – Prompt e chain finale
-    chain = prompt_template | log_prompt_runnable | llm | parser
+    # chain = prompt_template | log_prompt_runnable | llm | parser
+    chain = prompt_template | llm | parser
 
     response = chain.invoke(prompt_params)
     captions = response.captions
