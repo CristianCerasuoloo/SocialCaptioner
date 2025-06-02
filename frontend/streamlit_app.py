@@ -1,17 +1,28 @@
+import logging
 import random
 import tempfile
 
 import streamlit as st
+from PIL import Image
 
 from app.chain import captioning
+from app.postscraper import PostScraper
 from frontend.constants import DEFAULT_EXAMPLES, MOODS, SOCIAL_MEDIA_LIST
+
+# Configurazione del logger
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+scraper = PostScraper()
 
 st.set_page_config(layout="centered")
 st.title("🖼️ Social Captioner")
 
 uploaded_file = st.file_uploader("Upload an image!", type=["jpg", "jpeg", "png"])
 social = st.selectbox("Choose the social media.", SOCIAL_MEDIA_LIST)
-mood = st.selectbox("Chosse the mood you want to inject in the caption.", MOODS)
+mood = st.selectbox(
+    "Choose the mood you want to inject in the caption.", MOODS, index=5
+)
 
 # Inizializza session_state se non esiste
 if "selected_caption" not in st.session_state:
@@ -28,7 +39,7 @@ if uploaded_file:
         "Insert your description of the scene, what the image means to you, or any other context you want to provide.",
     )
 
-    st.subheader("✏️ Examples (otpional)")
+    st.subheader("✏️ Examples (optional)")
 
     # Inizializza session_state per contenere le caption esempio
     if "example_captions" not in st.session_state:
@@ -44,24 +55,99 @@ if uploaded_file:
             f"Example {i + 1}", value=caption, key=f"example_{i}"
         )
 
-    if st.button("✨ Generate"):
-        captions = captioning(
-            tmp_path,
-            social.lower(),
-            mood.lower(),
-            user_context=context,
-            examples=[
-                caption
-                for caption in st.session_state.example_captions
-                if caption != ""
-            ],
-        )
-        if not captions:
-            st.error("No caption generated.")
-            st.stop()
-        st.session_state.generated_captions = captions
-        st.session_state.selected_caption = None  # reset selezione
+    if social.lower() == "instagram":
+        st.subheader("📷 Instagram Post Fetcher")
 
+        st.markdown(
+            "Paste the URL of a single **public** Instagram post to extract its image and caption."
+        )
+        st.session_state.fetched_posts = st.session_state.get("fetched_posts", [])
+        st.markdown("Fetched posts: " + str(len(st.session_state.fetched_posts)))
+
+        post_url = st.text_input("Instagram Post URL (public only)", "")
+
+        if st.button("Fetch Post") and post_url:
+            with st.spinner("Fetching the post..."):
+                try:
+                    # Extract shortcode from the URL
+                    if "instagram.com/p/" not in post_url:
+                        raise ValueError("Not a valid Instagram post URL.")
+
+                    shortcode = post_url.rstrip("/").split("/")[-1]
+
+                    # Get Post object
+                    post = scraper.get_post(shortcode)
+                    if post:
+                        tmp_img_path, caption = post
+
+                    st.session_state.fetched_posts.append(
+                        {"path": tmp_img_path, "caption": caption}
+                    )
+
+                    # Display caption
+                    st.markdown(f"**Caption:** {caption}")
+
+                except Exception as e:
+                    logger.exception("Error fetching post %s", e)
+                    st.error(
+                        f"Something went wrong. Make sure the URL is correct and the post is public.\n\n**Error:** {e}"
+                    )
+
+        posts = st.session_state.fetched_posts
+        if posts:
+            cols_per_row = 3
+            rows = (len(posts) + cols_per_row - 1) // cols_per_row
+
+            for row in range(rows):
+                cols = st.columns(cols_per_row)
+                for i in range(cols_per_row):
+                    idx = row * cols_per_row + i
+                    if idx < len(posts):
+                        post = posts[idx]
+                        img_path = post["path"]
+                        caption = post["caption"]
+                        with cols[i]:
+                            # Thumbnail rendering
+                            try:
+                                img = Image.open(img_path)
+                                img.thumbnail((200, 200))  # Resize to thumbnail
+                                st.image(
+                                    img,
+                                    caption=caption[:60] + "..."
+                                    if len(caption) > 60
+                                    else caption,
+                                )
+                            except Exception:
+                                st.error("Image load error.")
+
+    if st.button("✨ Generate"):
+        try:
+            with st.spinner("Generating ..."):
+                captions = captioning(
+                    tmp_path,
+                    social.lower(),
+                    mood.lower(),
+                    user_context=context,
+                    examples=[
+                        caption
+                        for caption in st.session_state.example_captions
+                        if caption != ""
+                    ],
+                )
+                if not captions:
+                    st.error("No caption generated.")
+                    st.stop()
+                st.session_state.generated_captions = captions
+                st.session_state.selected_caption = None  # reset selezione
+
+                st.success(
+                    f"Generated {len(captions)} captions for {social} with mood '{mood}'!"
+                )
+        except Exception as e:
+            logger.exception("Error generating captions: %s", e)
+            st.error(
+                "Something went wrong while generating the captions. Please try again later."
+            )
     if "generated_captions" in st.session_state:
         st.subheader("💬 Generated captions:")
         for i, caption in enumerate(st.session_state.generated_captions):
