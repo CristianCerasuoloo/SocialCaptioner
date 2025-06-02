@@ -17,5 +17,4 @@ class BlipCaptioner:
         image = Image.open(image_path).convert("RGB")
         inputs = self.processor(image, return_tensors="pt")
         out = self.model.generate(**inputs)
-        print(out)
         return self.processor.decode(out[0], skip_special_tokens=True)
