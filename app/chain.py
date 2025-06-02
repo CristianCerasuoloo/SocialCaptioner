@@ -2,57 +2,81 @@ import getpass
 import os
 from typing import List
 
-from dotenv import load_dotenv
 from langchain.output_parsers import PydanticOutputParser
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnableLambda, RunnableMap
+from langchain_core.prompts import ChatPromptTemplate, FewShotChatMessagePromptTemplate
+from langchain_core.runnables import RunnableLambda
 from langchain_google_genai import GoogleGenerativeAI
-from pydantic import BaseModel, Field, field_validator
 
 from app.models.blib_captioner import BlipCaptioner
-from app.schemes.example import Example
+from app.schemes.example import Example, ExampleFromPost
+from app.schemes.expectedoutput import ExpectedOutput
 from app.schemes.post import Post
 
-# Carica le variabili dal file .env
-load_dotenv()
+
+class TemplateBuilder:
+    SYSTEM_BASE_PROMPT = (
+        "You are a helpful assistant that generates captions for social media posts. "
+        "You will be provided with a base caption and an optional additional context, and your task is to rephrase the caption "
+        "to fit the a {mood} mood for the {social} social media platform. You can give more options for the caption."
+        "{format_instructions}"
+    )
+
+    USER_PROMPT_TEMPLATE = "Base caption: {base_caption}\n{optional_context}\n"
+
+    USER_POST_EXAMPLE_PROMPT_TEMPLATE = "Base caption: {base_caption}"
+
+    ASSISTANT_POST_EXAMPLE_PROMPT_TEMPLATE = "{{'captions': '[{user_caption}]'}}"
+
+    def __init__(self):
+        self.parser = PydanticOutputParser(pydantic_object=ExpectedOutput)
+
+    def __get_prompt(self, few_shot_prompt=None):
+        if few_shot_prompt:
+            messages = [
+                ("system", self.SYSTEM_BASE_PROMPT),
+                few_shot_prompt,
+                ("user", self.USER_PROMPT_TEMPLATE),
+            ]
+        else:
+            messages = [
+                ("system", self.SYSTEM_BASE_PROMPT),
+                ("user", self.USER_PROMPT_TEMPLATE),
+            ]
+
+        return ChatPromptTemplate.from_messages(messages).partial(
+            format_instructions=self.parser.get_format_instructions()
+        )
+
+    def get_basic_prompt(self):
+        return self.__get_prompt()
+
+    def get_ig_posts_prompt(self, examples: List[ExampleFromPost]):
+        example_prompt = ChatPromptTemplate.from_messages(
+            [
+                ("user", self.USER_POST_EXAMPLE_PROMPT_TEMPLATE),
+                ("ai", self.ASSISTANT_POST_EXAMPLE_PROMPT_TEMPLATE),
+            ]
+        )
+        list_dict_examples = [example.model_dump() for example in examples]
+        few_shot_prompt = FewShotChatMessagePromptTemplate(
+            examples=list_dict_examples,
+            # This is a prompt template used to format each individual example.
+            example_prompt=example_prompt,
+        )
+
+        return self.__get_prompt(few_shot_prompt)
+
 
 gemini_api_key = os.getenv("GEMINI_API_KEY")
 if not gemini_api_key:
     gemini_api_key = getpass.getpass("Enter API key for Google Gemini: ")
 
 
-# Define your desired data structure.
-class ExpectedOutput(BaseModel):
-    captions: List[str] = Field(
-        description="""List of captions generated from the base caption and modified for the specified social media, mood and exampls (if given)."""
-    )
-
-    @field_validator("captions")
-    def validate_captions(cls, v):
-        if not isinstance(v, list) or not all(isinstance(item, str) for item in v):
-            raise ValueError("captions must be a list of strings.")
-        return v
-
-
 parser = PydanticOutputParser(pydantic_object=ExpectedOutput)
 
 blip = BlipCaptioner()
-llm = GoogleGenerativeAI(model="models/gemini-1.5-flash", api_key=gemini_api_key)
+llm = GoogleGenerativeAI(model="models/gemini-2.0-flash", api_key=gemini_api_key)
 
-
-system_template = (
-    "Using a provided basic caption, rephrase it to be the caption for {social} post with a {mood} mood.\
-    \n{optional_context}\
-    Return only a valid JSON object as specified.\n\n{format_instructions}"
-)
-
-prompt_template = ChatPromptTemplate.from_messages(
-    [("system", system_template), ("user", "{base_caption}")]
-).partial(format_instructions=parser.get_format_instructions())
-
-
-# Step 1 – Runnable per estrarre la caption dall'immagine
-blip_runnable = RunnableLambda(lambda x: f"Base caption: {blip(x['image_path'])}")  # type: ignore
 
 # Logging runnable to inspect the prompt
 log_prompt_runnable = RunnableLambda(
@@ -63,19 +87,6 @@ log_prompt_runnable = RunnableLambda(
 )
 
 
-# Step 2 – Unione base_caption + altri parametri in un unico dizionario
-input_map = {
-    "base_caption": blip_runnable,
-    "social": lambda x: x["social"],
-    "mood": lambda x: x["mood"],
-    "optional_context": lambda x: x["optional_context"],
-}
-merge_inputs = RunnableMap(input_map)
-
-# Step 3 – Prompt e chain finale
-chain = merge_inputs | prompt_template | log_prompt_runnable | llm | parser
-
-
 def captioning(
     image_path,
     social,
@@ -84,18 +95,17 @@ def captioning(
     examples: List[Example] = [],
     posts: List[Post] = [],
 ):
-    optional_context = ""
     if user_context != "":
-        optional_context = (
-            f" Take into account the context provided by the user: {user_context}."
-        )
+        optional_context = f"Optional context: {user_context}\n"
+    else:
+        optional_context = ""
 
-    if examples:
-        example_captions = [example.caption for example in examples]
-        optional_context += f"Consider the following examples for the rephrasing style: {', '.join(f'{example_captions}\n')}."
+    # if examples:
+    #     example_captions = [example.caption for example in examples]
+    #     optional_context += f"Consider the following examples for the rephrasing style: {', '.join(f'{example_captions}\n')}."
 
+    ig_posts = []  # List to hold a dict for each post to process as ExampleFromPost if any
     if posts:
-        ig_posts = []
         for post in posts:
             resource_paths = (
                 [post.resource_path] if not post.is_carousel else post.resource_path
@@ -106,22 +116,28 @@ def captioning(
                         {
                             "image": resource_path,
                             "user_caption": post.caption,
-                            "blip_caption": blip(resource_path),
+                            "base_caption": blip(
+                                resource_path
+                            ),  # Generate base caption using BLIP
                         }
                     )
 
-        optional_context += "Consider the following pairs of description-caption to extract the user style:\n"
-        for post in ig_posts:
-            optional_context += (
-                f"Base caption: {post['blip_caption']}\t"
-                f"User caption: {post['user_caption']}\n"
-            )
+    if ig_posts:
+        prompt_template = TemplateBuilder().get_ig_posts_prompt(
+            [ExampleFromPost(**post) for post in ig_posts]
+        )
+    else:
+        prompt_template = TemplateBuilder().get_basic_prompt()
+
     prompt_params = {
         "social": social,
         "mood": mood,
-        "image_path": image_path,
+        "base_caption": blip(image_path),
         "optional_context": optional_context,
     }
+
+    # Step 3 – Prompt e chain finale
+    chain = prompt_template | log_prompt_runnable | llm | parser
 
     response = chain.invoke(prompt_params)
     captions = response.captions

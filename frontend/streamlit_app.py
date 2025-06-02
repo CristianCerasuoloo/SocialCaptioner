@@ -1,13 +1,17 @@
 import logging
-import random
 import tempfile
 
 import streamlit as st
+from dotenv import load_dotenv
 from PIL import Image
 
 from app.chain import captioning
 from app.postscraper import PostScraper
-from frontend.constants import DEFAULT_EXAMPLES, MOODS, SOCIAL_MEDIA_LIST
+from frontend.constants import MOODS, SOCIAL_MEDIA_LIST
+
+# Carica le variabili dal file .env
+load_dotenv()
+
 
 # Configurazione del logger
 logging.basicConfig(level=logging.INFO)
@@ -33,27 +37,29 @@ if uploaded_file:
         tmp_file.write(uploaded_file.read())
         tmp_path = tmp_file.name
 
-    st.image(tmp_path, caption="Uploaded image", use_container_width=True)
+    img = Image.open(tmp_path)
+    img.thumbnail((300, 300))
+    st.image(img, caption="Uploaded image")
 
     context = st.text_area(
-        "Insert your description of the scene, what the image means to you, or any other context you want to provide.",
+        "Insert your description of the scene, what the image means to you, or any other context or instruction you want to provide.",
     )
 
-    st.subheader("✏️ Examples (optional)")
+    # st.subheader("✏️ Examples (optional)")
 
-    # Inizializza session_state per contenere le caption esempio
-    if "example_captions" not in st.session_state:
-        st.session_state.example_captions = []
+    # # Inizializza session_state per contenere le caption esempio
+    # if "example_captions" not in st.session_state:
+    #     st.session_state.example_captions = []
 
-    # Bottone per aggiungere un nuovo campo di esempio
-    if st.button("+ Add example"):
-        st.session_state.example_captions.append(random.choice(DEFAULT_EXAMPLES))
+    # # Bottone per aggiungere un nuovo campo di esempio
+    # if st.button("+ Add example"):
+    #     st.session_state.example_captions.append(random.choice(DEFAULT_EXAMPLES))
 
-    # Visualizza tutti gli input di esempio
-    for i, caption in enumerate(st.session_state.example_captions):
-        st.session_state.example_captions[i] = st.text_input(
-            f"Example {i + 1}", value=caption, key=f"example_{i}"
-        )
+    # # Visualizza tutti gli input di esempio
+    # for i, caption in enumerate(st.session_state.example_captions):
+    #     st.session_state.example_captions[i] = st.text_input(
+    #         f"Example {i + 1}", value=caption, key=f"example_{i}"
+    #     )
 
     if social.lower() == "instagram":
         st.subheader("📷 Instagram Post Fetcher")
@@ -139,11 +145,11 @@ if uploaded_file:
                     social.lower(),
                     mood.lower(),
                     user_context=context,
-                    examples=[
-                        caption
-                        for caption in st.session_state.example_captions
-                        if caption != ""
-                    ],
+                    examples=[],  # [
+                    #     caption
+                    #     for caption in st.session_state.example_captions
+                    #     if caption != ""
+                    # ],
                     posts=st.session_state.get("fetched_posts", []),
                 )
                 if not captions:
