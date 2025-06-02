@@ -61,64 +61,75 @@ if uploaded_file:
         st.markdown(
             "Paste the URL of a single **public** Instagram post to extract its image and caption."
         )
-        st.session_state.fetched_posts = st.session_state.get("fetched_posts", [])
-        st.markdown("Fetched posts: " + str(len(st.session_state.fetched_posts)))
+        with st.form("instagram_post_form"):
+            st.session_state.fetched_posts = st.session_state.get("fetched_posts", [])
 
-        post_url = st.text_input("Instagram Post URL (public only)", "")
+            post_url = st.text_input("Instagram Post URL (public only)", "")
+            fetch_submit = st.form_submit_button("Fetch Post")
 
-        if st.button("Fetch Post") and post_url:
-            with st.spinner("Fetching the post..."):
-                try:
-                    # Extract shortcode from the URL
-                    if "instagram.com/p/" not in post_url:
-                        raise ValueError("Not a valid Instagram post URL.")
+            if fetch_submit and post_url:
+                with st.spinner("Fetching the post..."):
+                    try:
+                        # Extract shortcode from the URL
+                        if "instagram.com/p/" not in post_url:
+                            raise ValueError("Not a valid Instagram post URL.")
 
-                    shortcode = post_url.rstrip("/").split("/")[-1]
+                        shortcode = post_url.rstrip("/").split("/")[-1]
 
-                    # Get Post object
-                    post = scraper.get_post(shortcode)
-                    if post:
-                        tmp_img_path, caption = post
+                        # Get Post object
+                        post = scraper.get_post(shortcode)
+                        if post:
+                            st.session_state.fetched_posts.append(post)
 
-                    st.session_state.fetched_posts.append(
-                        {"path": tmp_img_path, "caption": caption}
-                    )
+                            st.success(
+                                f"Post fetched successfully! Fetched {len(st.session_state.fetched_posts)} posts in total."
+                            )
+                        else:
+                            st.error("Post not found or is private.")
 
-                    # Display caption
-                    st.markdown(f"**Caption:** {caption}")
+                    except Exception as e:
+                        logger.exception("Error fetching post %s", e)
+                        st.error(
+                            f"Something went wrong. Make sure the URL is correct and the post is public.\n\n**Error:** {e}"
+                        )
 
-                except Exception as e:
-                    logger.exception("Error fetching post %s", e)
-                    st.error(
-                        f"Something went wrong. Make sure the URL is correct and the post is public.\n\n**Error:** {e}"
-                    )
+            posts = st.session_state.fetched_posts
+            if posts:
+                cols_per_row = 3
+                rows = (len(posts) + cols_per_row - 1) // cols_per_row
 
-        posts = st.session_state.fetched_posts
-        if posts:
-            cols_per_row = 3
-            rows = (len(posts) + cols_per_row - 1) // cols_per_row
+                for row in range(rows):
+                    cols = st.columns(cols_per_row)
+                    for i in range(cols_per_row):
+                        idx = row * cols_per_row + i
+                        if idx < len(posts):
+                            post = posts[idx]
 
-            for row in range(rows):
-                cols = st.columns(cols_per_row)
-                for i in range(cols_per_row):
-                    idx = row * cols_per_row + i
-                    if idx < len(posts):
-                        post = posts[idx]
-                        img_path = post["path"]
-                        caption = post["caption"]
-                        with cols[i]:
-                            # Thumbnail rendering
-                            try:
-                                img = Image.open(img_path)
-                                img.thumbnail((200, 200))  # Resize to thumbnail
-                                st.image(
-                                    img,
-                                    caption=caption[:60] + "..."
-                                    if len(caption) > 60
-                                    else caption,
-                                )
-                            except Exception:
-                                st.error("Image load error.")
+                            if post.is_carousel:
+                                img_path = post.resource_path[
+                                    0
+                                ]  # DIsplay the first image of the carousel
+                                caption = post.caption + "[0]"
+                            else:
+                                img_path = post.resource_path
+                                caption = post.caption
+
+                            print("Displaying post %d: %s %s", idx, img_path, caption)
+                            with cols[i]:
+                                # Thumbnail rendering
+                                try:
+                                    img = Image.open(img_path)
+                                    img.thumbnail((200, 200))  # Resize to thumbnail
+                                    st.image(
+                                        img,
+                                        caption=caption[:60] + "..."
+                                        if len(caption) > 60
+                                        else caption,
+                                    )
+                                except Exception as e:
+                                    logger.exception("Error loading image: %s", e)
+
+                                    st.error("Image load error.")
 
     if st.button("✨ Generate"):
         try:
@@ -133,6 +144,7 @@ if uploaded_file:
                         for caption in st.session_state.example_captions
                         if caption != ""
                     ],
+                    posts=st.session_state.get("fetched_posts", []),
                 )
                 if not captions:
                     st.error("No caption generated.")
