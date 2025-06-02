@@ -4,8 +4,8 @@
     "python.analysis.typeCheckingMode": "basic",
     "editor.formatOnSave": true,
     "editor.codeActionsOnSave": {
-        "source.fixAll": true,
-        "source.organizeImports": true
+        "source.fixAll": "explicit",
+        "source.organizeImports": "explicit"
     },
     "[python]": {
         "editor.formatOnSave": true,
